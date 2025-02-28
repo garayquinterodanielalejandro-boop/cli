@@ -33,6 +33,7 @@ cd ${FORK}
 # Prepare a branch where changes are pulled from the upstream default branch but pushed to fork
 exec git checkout -b feature-branch upstream/main
 exec git config remote.pushDefault origin
+exec git config unset remote.upstream.gh-resolved
 exec git commit --allow-empty -m 'Empty Commit'
 exec git push
 

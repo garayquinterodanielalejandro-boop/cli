@@ -38,6 +38,7 @@ exec git checkout -b feature-branch
 exec git branch --set-upstream-to origin/main
 exec git rev-parse --abbrev-ref feature-branch@{upstream}
 stdout origin/main
+exec git config unset remote.upstream.gh-resolved
 exec git commit --allow-empty -m 'Empty Commit'
 exec git push
 
