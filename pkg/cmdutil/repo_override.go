@@ -58,7 +58,7 @@ func EnableRepoOverride(cmd *cobra.Command, f *Factory) {
 		if userProvidedRepo == "" {
 			// If there was no flag set, then check the GH_REPO environment variable,
 			// which has lower precedence.
-			repoOverride, ok := os.LookupEnv("GH_REPO")
+			userProvidedRepo = os.Getenv("GH_REPO")
 			// If the envrionment variable was set, then set the value of the `repo` flag,
 			// this ensures that checks for `HasChanged` work correctly. It's a bit "spooky"
 			// action at a distance because the flag will not have been set by the user,
@@ -68,9 +68,9 @@ func EnableRepoOverride(cmd *cobra.Command, f *Factory) {
 			// the user set the repo, and the alternative is them having knowledge of the flag and env var,
 			// or by adjusting all our types so that the "source" of the BaseRepo is surfaced, which is a
 			// pretty big change.
-			if ok {
+			if userProvidedRepo != "" {
 				// TODO: comment why we ignore error
-				_ = cmd.Flags().Set("repo", repoOverride)
+				_ = cmd.Flags().Set("repo", userProvidedRepo)
 			}
 		}
 
