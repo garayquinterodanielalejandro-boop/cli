@@ -652,7 +652,8 @@ func NewCreateContext(opts *CreateOptions) (*CreateContext, error) {
 	if prRefs.HeadRepo != nil && prRefs.BranchName != "" {
 		headRemote, err := remotes.FindByRepo(prRefs.HeadRepo.RepoOwner(), prRefs.HeadRepo.RepoName())
 		if err == nil {
-			refsForLookup := []string{"HEAD", fmt.Sprintf("refs/remotes/%s/%s", headRemote, prRefs.BranchName)}
+			headRefName := fmt.Sprintf("refs/remotes/%s/%s", headRemote, prRefs.BranchName)
+			refsForLookup := []string{"HEAD", headRefName}
 			resolvedRefs, err := gitClient.ShowRefs(context.Background(), refsForLookup)
 
 			// If there is more than one resolved ref, then remote head ref was resolved.
@@ -672,7 +673,7 @@ func NewCreateContext(opts *CreateOptions) (*CreateContext, error) {
 
 	var forkHeadRepo bool
 	var isPushEnabled bool
-	
+
 	if promptForHeadRepo && opts.IO.CanPrompt() {
 		isPushEnabled = true
 		// Since we could not determine a head ref, prompt the user for the head repository to push
