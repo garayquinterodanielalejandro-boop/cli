@@ -76,11 +76,9 @@ type CreateContext struct {
 	// This struct stores contextual data about the creation process and is for building up enough
 	// data to create a pull request
 	RepoContext        *ghContext.ResolvedRemotes
-	BaseRepo           *api.Repository
-	HeadRepo           ghrepo.Interface
+	PrRefs             shared.PullRequestRefs
 	BaseTrackingBranch string
-	BaseBranch         string
-	HeadBranch         string
+	BaseBranch         string // Currently not supported by shared.PullRequestRefs struct
 	HeadBranchLabel    string
 	HeadRemote         *ghContext.Remote
 	isPushEnabled      bool
@@ -338,7 +336,7 @@ func createRun(opts *CreateOptions) error {
 		fmt.Fprintf(opts.IO.ErrOut, message,
 			cs.Cyan(ctx.HeadBranchLabel),
 			cs.Cyan(ctx.BaseBranch),
-			ghrepo.FullName(ctx.BaseRepo))
+			ghrepo.FullName(ctx.PrRefs.BaseRepo))
 	}
 
 	if !opts.EditorMode && (opts.FillVerbose || opts.Autofill || opts.FillFirst || (opts.TitleProvided && opts.BodyProvided)) {
@@ -361,7 +359,7 @@ func createRun(opts *CreateOptions) error {
 		action = shared.SubmitDraftAction
 	}
 
-	tpl := shared.NewTemplateManager(client.HTTP(), ctx.BaseRepo, opts.Prompter, opts.RootDirOverride, opts.RepoOverride == "", true)
+	tpl := shared.NewTemplateManager(client.HTTP(), ctx.PrRefs.BaseRepo, opts.Prompter, opts.RootDirOverride, opts.RepoOverride == "", true)
 
 	if opts.EditorMode {
 		if opts.Template != "" {
@@ -429,7 +427,7 @@ func createRun(opts *CreateOptions) error {
 		}
 
 		allowPreview := !state.HasMetadata() && shared.ValidURL(openURL) && !opts.DryRun
-		allowMetadata := ctx.BaseRepo.ViewerCanTriage()
+		allowMetadata := ctx.PrRefs.BaseRepo.(*api.Repository).ViewerCanTriage()
 		action, err = shared.ConfirmPRSubmission(opts.Prompter, allowPreview, allowMetadata, state.Draft)
 		if err != nil {
 			return fmt.Errorf("unable to confirm: %w", err)
@@ -439,10 +437,10 @@ func createRun(opts *CreateOptions) error {
 			fetcher := &shared.MetadataFetcher{
 				IO:        opts.IO,
 				APIClient: client,
-				Repo:      ctx.BaseRepo,
+				Repo:      ctx.PrRefs.BaseRepo,
 				State:     state,
 			}
-			err = shared.MetadataSurvey(opts.Prompter, opts.IO, ctx.BaseRepo, fetcher, state)
+			err = shared.MetadataSurvey(opts.Prompter, opts.IO, ctx.PrRefs.BaseRepo, fetcher, state)
 			if err != nil {
 				return err
 			}
@@ -486,7 +484,7 @@ var regexPattern = regexp.MustCompile(`(?m)^`)
 
 func initDefaultTitleBody(ctx CreateContext, state *shared.IssueMetadataState, useFirstCommit bool, addBody bool) error {
 	baseRef := ctx.BaseTrackingBranch
-	headRef := ctx.HeadBranch
+	headRef := ctx.PrRefs.BranchName
 	gitClient := ctx.GitClient
 
 	commits, err := gitClient.Commits(context.Background(), baseRef, headRef)
@@ -554,7 +552,7 @@ func NewIssueState(ctx CreateContext, opts CreateOptions) (*shared.IssueMetadata
 		milestoneTitles = []string{opts.Milestone}
 	}
 
-	meReplacer := shared.NewMeReplacer(ctx.Client, ctx.BaseRepo.RepoHost())
+	meReplacer := shared.NewMeReplacer(ctx.Client, ctx.PrRefs.BaseRepo.RepoHost())
 	assignees, err := meReplacer.ReplaceSlice(opts.Assignees)
 	if err != nil {
 		return nil, err
@@ -763,11 +761,9 @@ func NewCreateContext(opts *CreateOptions) (*CreateContext, error) {
 	}
 
 	return &CreateContext{
-		BaseRepo:           prRefs.BaseRepo.(*api.Repository),
-		HeadRepo:           prRefs.HeadRepo,
+		PrRefs:             prRefs,
 		BaseBranch:         baseBranch, // Currently not supported by shared.PullRequestRefs struct
 		BaseTrackingBranch: baseTrackingBranch,
-		HeadBranch:         prRefs.BranchName,
 		HeadBranchLabel:    headBranchLabel,
 		HeadRemote:         headRemote,
 		isPushEnabled:      isPushEnabled,
@@ -806,7 +802,7 @@ func submitPR(opts CreateOptions, ctx CreateContext, state shared.IssueMetadataS
 		return errors.New("pull request title must not be blank")
 	}
 
-	err := shared.AddMetadataToIssueParams(client, ctx.BaseRepo, params, &state)
+	err := shared.AddMetadataToIssueParams(client, ctx.PrRefs.BaseRepo, params, &state)
 	if err != nil {
 		return err
 	}
@@ -820,7 +816,7 @@ func submitPR(opts CreateOptions, ctx CreateContext, state shared.IssueMetadataS
 	}
 
 	opts.IO.StartProgressIndicator()
-	pr, err := api.CreatePullRequest(client, ctx.BaseRepo, params)
+	pr, err := api.CreatePullRequest(client, ctx.PrRefs.BaseRepo.(*api.Repository), params)
 	opts.IO.StopProgressIndicator()
 	if pr != nil {
 		fmt.Fprintln(opts.IO.Out, pr.URL)
@@ -917,7 +913,7 @@ func previewPR(opts CreateOptions, openURL string) error {
 
 func handlePush(opts CreateOptions, ctx CreateContext) error {
 	didForkRepo := false
-	headRepo := ctx.HeadRepo
+	headRepo := ctx.PrRefs.HeadRepo
 	headRemote := ctx.HeadRemote
 	client := ctx.Client
 	gitClient := ctx.GitClient
@@ -927,7 +923,7 @@ func handlePush(opts CreateOptions, ctx CreateContext) error {
 	// one by forking the base repository
 	if headRepo == nil && ctx.isPushEnabled {
 		opts.IO.StartProgressIndicator()
-		headRepo, err = api.ForkRepo(client, ctx.BaseRepo, "", "", false)
+		headRepo, err = api.ForkRepo(client, ctx.PrRefs.BaseRepo, "", "", false)
 		opts.IO.StopProgressIndicator()
 		if err != nil {
 			return fmt.Errorf("error forking repo: %w", err)
@@ -970,7 +966,7 @@ func handlePush(opts CreateOptions, ctx CreateContext) error {
 			remoteName = "fork"
 		}
 
-		if origin != nil && upstream == nil && ghrepo.IsSame(origin, ctx.BaseRepo) {
+		if origin != nil && upstream == nil && ghrepo.IsSame(origin, ctx.PrRefs.BaseRepo) {
 			renameCmd, err := gitClient.Command(context.Background(), "remote", "rename", "origin", upstreamName)
 			if err != nil {
 				return err
@@ -979,7 +975,7 @@ func handlePush(opts CreateOptions, ctx CreateContext) error {
 				return fmt.Errorf("error renaming origin remote: %w", err)
 			}
 			remoteName = "origin"
-			fmt.Fprintf(opts.IO.ErrOut, "Changed %s remote to %q\n", ghrepo.FullName(ctx.BaseRepo), upstreamName)
+			fmt.Fprintf(opts.IO.ErrOut, "Changed %s remote to %q\n", ghrepo.FullName(ctx.PrRefs.BaseRepo), upstreamName)
 		}
 
 		gitRemote, err := gitClient.AddRemote(context.Background(), remoteName, headRepoURL, []string{})
@@ -1013,7 +1009,7 @@ func handlePush(opts CreateOptions, ctx CreateContext) error {
 		pushBranch := func() error {
 			w := NewRegexpWriter(opts.IO.ErrOut, gitPushRegexp, "")
 			defer w.Flush()
-			ref := fmt.Sprintf("HEAD:refs/heads/%s", ctx.HeadBranch)
+			ref := fmt.Sprintf("HEAD:refs/heads/%s", ctx.PrRefs.BranchName)
 			bo := backoff.NewConstantBackOff(2 * time.Second)
 			ctx := context.Background()
 			return backoff.Retry(func() error {
@@ -1040,10 +1036,10 @@ func handlePush(opts CreateOptions, ctx CreateContext) error {
 
 func generateCompareURL(ctx CreateContext, state shared.IssueMetadataState) (string, error) {
 	u := ghrepo.GenerateRepoURL(
-		ctx.BaseRepo,
+		ctx.PrRefs.BaseRepo,
 		"compare/%s...%s?expand=1",
 		url.PathEscape(ctx.BaseBranch), url.PathEscape(ctx.HeadBranchLabel))
-	url, err := shared.WithPrAndIssueQueryParams(ctx.Client, ctx.BaseRepo, u, state)
+	url, err := shared.WithPrAndIssueQueryParams(ctx.Client, ctx.PrRefs.BaseRepo, u, state)
 	if err != nil {
 		return "", err
 	}

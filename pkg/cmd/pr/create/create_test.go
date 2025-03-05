@@ -1686,7 +1686,9 @@ func Test_generateCompareURL(t *testing.T) {
 		{
 			name: "basic",
 			ctx: CreateContext{
-				BaseRepo:        api.InitRepoHostname(&api.Repository{Name: "REPO", Owner: api.RepositoryOwner{Login: "OWNER"}}, "github.com"),
+				PrRefs: shared.PullRequestRefs{
+					BaseRepo: api.InitRepoHostname(&api.Repository{Name: "REPO", Owner: api.RepositoryOwner{Login: "OWNER"}}, "github.com"),
+				},
 				BaseBranch:      "main",
 				HeadBranchLabel: "feature",
 			},
@@ -1696,7 +1698,9 @@ func Test_generateCompareURL(t *testing.T) {
 		{
 			name: "with labels",
 			ctx: CreateContext{
-				BaseRepo:        api.InitRepoHostname(&api.Repository{Name: "REPO", Owner: api.RepositoryOwner{Login: "OWNER"}}, "github.com"),
+				PrRefs: shared.PullRequestRefs{
+					BaseRepo: api.InitRepoHostname(&api.Repository{Name: "REPO", Owner: api.RepositoryOwner{Login: "OWNER"}}, "github.com"),
+				},
 				BaseBranch:      "a",
 				HeadBranchLabel: "b",
 			},
@@ -1709,7 +1713,9 @@ func Test_generateCompareURL(t *testing.T) {
 		{
 			name: "'/'s in branch names/labels are percent-encoded",
 			ctx: CreateContext{
-				BaseRepo:        api.InitRepoHostname(&api.Repository{Name: "REPO", Owner: api.RepositoryOwner{Login: "OWNER"}}, "github.com"),
+				PrRefs: shared.PullRequestRefs{
+					BaseRepo: api.InitRepoHostname(&api.Repository{Name: "REPO", Owner: api.RepositoryOwner{Login: "OWNER"}}, "github.com"),
+				},
 				BaseBranch:      "main/trunk",
 				HeadBranchLabel: "owner:feature",
 			},
@@ -1725,7 +1731,9 @@ func Test_generateCompareURL(t *testing.T) {
 				    - See https://github.com/golang/go/issues/27559.
 			*/
 			ctx: CreateContext{
-				BaseRepo:        api.InitRepoHostname(&api.Repository{Name: "REPO", Owner: api.RepositoryOwner{Login: "OWNER"}}, "github.com"),
+				PrRefs: shared.PullRequestRefs{
+					BaseRepo: api.InitRepoHostname(&api.Repository{Name: "REPO", Owner: api.RepositoryOwner{Login: "OWNER"}}, "github.com"),
+				},
 				BaseBranch:      "main/trunk",
 				HeadBranchLabel: "owner:!$&'()+,;=@",
 			},
@@ -1735,7 +1743,9 @@ func Test_generateCompareURL(t *testing.T) {
 		{
 			name: "with template",
 			ctx: CreateContext{
-				BaseRepo:        api.InitRepoHostname(&api.Repository{Name: "REPO", Owner: api.RepositoryOwner{Login: "OWNER"}}, "github.com"),
+				PrRefs: shared.PullRequestRefs{
+					BaseRepo: api.InitRepoHostname(&api.Repository{Name: "REPO", Owner: api.RepositoryOwner{Login: "OWNER"}}, "github.com"),
+				},
 				BaseBranch:      "main",
 				HeadBranchLabel: "feature",
 			},
