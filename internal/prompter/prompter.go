@@ -77,8 +77,31 @@ func (p *huhPrompter) Select(prompt, defaultValue string, options []string) (int
 	return result, err
 }
 
-func (h *huhPrompter) MultiSelect(prompt string, defaults []string, options []string) ([]int, error) {
-	panic("not implemented")
+func (p *huhPrompter) MultiSelect(prompt string, defaults []string, options []string) ([]int, error) {
+	var result []int
+	formOptions := []huh.Option[int]{}
+	for i, o := range options {
+		formOptions = append(formOptions, huh.NewOption(o, i))
+
+		for _, d := range defaults {
+			if d == o {
+				result = append(result, i)
+			}
+		}
+	}
+
+	form := p.newForm(
+		huh.NewGroup(
+			huh.NewMultiSelect[int]().
+				Title(prompt).
+				Value(&result).
+				Limit(len(options)).
+				Options(formOptions...),
+		),
+	)
+
+	err := form.Run()
+	return result, err
 }
 
 func (p *huhPrompter) Input(prompt, defaultValue string) (string, error) {
