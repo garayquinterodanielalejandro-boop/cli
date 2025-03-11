@@ -565,7 +565,7 @@ func NewCreateContext(opts *CreateOptions) (*CreateContext, error) {
 	}
 
 	gitClient := opts.GitClient
-	if ucc, err := gitClient.UncommittedChangeCount(context.Background()); err == nil && ucc > 0 {
+	if ucc, err := gitClient.UncommittedChangeCount(ctx); err == nil && ucc > 0 {
 		fmt.Fprintf(opts.IO.ErrOut, "Warning: %s\n", text.Pluralize(ucc, "uncommitted change"))
 	}
 
@@ -616,7 +616,7 @@ func NewCreateContext(opts *CreateOptions) (*CreateContext, error) {
 		}
 	}
 
-	targetHeadBranchConfig, err := gitClient.ReadBranchConfig(context.Background(), targetHeadBranch)
+	targetHeadBranchConfig, err := gitClient.ReadBranchConfig(ctx, targetHeadBranch)
 	if err != nil {
 		return nil, err
 	}
@@ -628,8 +628,8 @@ func NewCreateContext(opts *CreateOptions) (*CreateContext, error) {
 		return nil, err
 	}
 	// Suppressing these errors as we have other means of computing the PullRequestRefs when these fail.
-	parsedPushRevision, _ := opts.GitClient.ParsePushRevision(ctx, targetHeadBranch)
-	pushDefault, err := opts.GitClient.PushDefault(ctx)
+	parsedPushRevision, _ := gitClient.ParsePushRevision(ctx, targetHeadBranch)
+	pushDefault, err := gitClient.PushDefault(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -660,7 +660,7 @@ func NewCreateContext(opts *CreateOptions) (*CreateContext, error) {
 		if headRemote != nil && err == nil {
 			headRefName := fmt.Sprintf("refs/remotes/%s/%s", headRemote, prRefs.BranchName)
 			refsForLookup := []string{"HEAD", headRefName}
-			resolvedRefs, err := gitClient.ShowRefs(context.Background(), refsForLookup)
+			resolvedRefs, err := gitClient.ShowRefs(ctx, refsForLookup)
 
 			// If there is more than one resolved ref, then remote head ref was resolved.
 			if err == nil && len(resolvedRefs) > 1 {
