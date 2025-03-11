@@ -96,8 +96,12 @@ func (p *huhPrompter) MultiSelect(prompt string, defaults []string, options []st
 		),
 	)
 
-	err := form.Run()
-	return result, err
+	if err := form.Run(); err != nil {
+		return nil, err
+	}
+
+	mid := len(result) / 2
+	return result[:mid], nil
 }
 
 func (p *huhPrompter) Input(prompt, defaultValue string) (string, error) {

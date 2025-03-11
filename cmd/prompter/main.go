@@ -12,7 +12,7 @@ func main() {
 	io := iostreams.System()
 	p := prompter.New("vim", io.In, io.Out, io.ErrOut)
 
-	// Demonstrating single-option select / dropdown prompts
+	fmt.Println("Demonstrating Single Select")
 	cuisines := []string{"Italian", "Greek", "Indian", "Japanese", "American"}
 	favorite, err := p.Select("Favorite cuisine?", "Italian", cuisines)
 	if err != nil {
@@ -20,7 +20,7 @@ func main() {
 	}
 	fmt.Printf("Favorite cuisine: %s\n", cuisines[favorite])
 
-	// Demonstrating multi-option select / dropdown prompts
+	fmt.Println("Demonstrating Multi Select")
 	favorites, err := p.MultiSelect("Favorite cuisines?", []string{}, cuisines)
 	if err != nil {
 		log.Fatal(err)
@@ -29,49 +29,49 @@ func main() {
 		fmt.Printf("Favorite cuisine: %s\n", cuisines[f])
 	}
 
-	// Demonstrating text input prompts
+	fmt.Println("Demonstrating Text Input")
 	text, err := p.Input("Favorite meal?", "Breakfast")
 	if err != nil {
 		log.Fatal(err)
 	}
 	fmt.Printf("Favorite meal: %s\n", text)
 
-	// Demonstrating password input prompts
+	fmt.Println("Demonstrating Password Input (unmasked)")
 	safeword, err := p.Password("Safe word?")
 	if err != nil {
 		log.Fatal(err)
 	}
 	fmt.Printf("Safe word: %s\n", safeword)
 
-	// Demonstrating confirmation prompts
+	fmt.Println("Demonstrating Confirmation")
 	confirmation, err := p.Confirm("Are you sure?", false)
 	if err != nil {
 		log.Fatal(err)
 	}
 	fmt.Printf("Confirmation: %t\n", confirmation)
 
-	// Demonstrating auth token prompt
+	fmt.Println("Demonstrating Auth Token (can't be blank)")
 	token, err := p.AuthToken()
 	if err != nil {
 		log.Fatal(err)
 	}
 	fmt.Printf("Auth token: %s\n", token)
 
-	// Demonstrating deletion confirmation prompt
+	fmt.Println("Demonstrating Deletion Confirmation")
 	err = p.ConfirmDeletion("delete-me")
 	if err != nil {
 		log.Fatal(err)
 	}
 	fmt.Println("Item deleted")
 
-	// Demonstrating hostname input prompt
+	fmt.Println("Demonstrating Hostname (must be valid hostname)")
 	hostname, err := p.InputHostname()
 	if err != nil {
 		log.Fatal(err)
 	}
 	fmt.Printf("Hostname: %s\n", hostname)
 
-	// Demonstrating editor prompt
+	fmt.Println("Demonstrating Markdown Editor with Initial Text")
 	editorText, err := p.MarkdownEditor("Edit your text:", "Initial text", true)
 	if err != nil {
 		log.Fatal(err)
