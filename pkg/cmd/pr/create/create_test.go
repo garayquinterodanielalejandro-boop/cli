@@ -331,7 +331,6 @@ func TestNewCmdCreate(t *testing.T) {
 
 func Test_createRun(t *testing.T) {
 	tests := []struct {
-		run                bool
 		name               string
 		setup              func(*CreateOptions, *testing.T) func()
 		cmdStubs           func(*run.CommandStubber)
@@ -768,7 +767,6 @@ func Test_createRun(t *testing.T) {
 			expectedErrOut: "\nCreating pull request for feature into master in OWNER/REPO\n\n",
 		},
 		{
-			run:  true,
 			name: "create fork",
 			tty:  true,
 			setup: func(opts *CreateOptions, t *testing.T) func() {
@@ -1548,9 +1546,6 @@ func Test_createRun(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
-		if !tt.run {
-			continue
-		}
 		t.Run(tt.name, func(t *testing.T) {
 			branch := "feature"
 			reg := &httpmock.Registry{}
@@ -1568,7 +1563,6 @@ func Test_createRun(t *testing.T) {
 
 			cs, cmdTeardown := run.Stub()
 			defer cmdTeardown(t)
-			cs.Register(`git status --porcelain`, 0, "")
 
 			if !tt.customBranchConfig {
 				cs.Register(`git config --get-regexp \^branch\\\..+\\\.\(remote\|merge\|pushremote\|gh-merge-base\)\$`, 0, "")
@@ -1619,6 +1613,10 @@ func Test_createRun(t *testing.T) {
 				cleanSetup = tt.setup(&opts, t)
 			}
 			defer cleanSetup()
+
+			if opts.HeadBranch == "" {
+				cs.Register(`git status --porcelain`, 0, "")
+			}
 
 			err := createRun(&opts)
 			output := &test.CmdOut{
