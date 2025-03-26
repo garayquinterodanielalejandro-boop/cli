@@ -594,8 +594,6 @@ func initDefaultTitleBody(ctx CreateContext, state *shared.IssueMetadataState, u
 	return nil
 }
 
-type remotesFn func() (ghContext.Remotes, error)
-
 func NewIssueState(ctx CreateContext, opts CreateOptions) (*shared.IssueMetadataState, error) {
 	var milestoneTitles []string
 	if opts.Milestone != "" {
