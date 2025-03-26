@@ -2,10 +2,16 @@ package shared
 
 import (
 	"context"
+	"errors"
+	"net/http"
+	"net/url"
+	"testing"
 
 	ghContext "github.com/cli/cli/v2/context"
 	"github.com/cli/cli/v2/git"
 	"github.com/cli/cli/v2/internal/ghrepo"
+	"github.com/cli/cli/v2/pkg/httpmock"
+	"github.com/stretchr/testify/require"
 )
 
 type args struct {
