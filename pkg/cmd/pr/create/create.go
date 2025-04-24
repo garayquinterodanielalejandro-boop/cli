@@ -839,24 +839,32 @@ func NewCreateContext(opts *CreateOptions) (*CreateContext, error) {
 	//
 	// All that said, this has been the behaviour for a long, long time, and I do not want to make other behavioural changes
 	// in what is mostly a refactor.
-	refsToLookup := []string{"HEAD"}
+	refNamesToTrackingRefs := make(map[string]git.RemoteTrackingRef, len(remotes))
+	refNamesToLookup := []string{"HEAD"}
 	for _, remote := range remotes {
-		refsToLookup = append(refsToLookup, fmt.Sprintf("refs/remotes/%s/%s", remote.Name, currentBranch))
+		refName := fmt.Sprintf("refs/remotes/%s/%s", remote.Name, currentBranch)
+		refNamesToLookup = append(refNamesToLookup, refName)
+		refNamesToTrackingRefs[refName] = git.RemoteTrackingRef{
+			Remote: remote.Name,
+			Branch: currentBranch,
+		}
 	}
 
 	// Ignoring the error in this case is allowed because we may get refs and an error (see: --verify flag above).
 	// Ideally there would be a typed error to allow us to distinguish between an execution error and some refs
 	// not existing. However, this is too much to take on in an already large refactor.
-	refs, _ := opts.GitClient.ShowRefs(context.Background(), refsToLookup)
+	refs, _ := opts.GitClient.ShowRefs(context.Background(), refNamesToLookup)
 	if len(refs) > 1 {
 		headRef := refs[0]
 		var firstMatchingRef o.Option[git.RemoteTrackingRef]
 		// Loop over all the refs, trying to find one that matches the SHA of HEAD.
 		for _, r := range refs[1:] {
 			if r.Hash == headRef.Hash {
-				remoteTrackingRef, err := git.ParseRemoteTrackingRef(r.Name)
-				if err != nil {
-					return nil, err
+				remoteTrackingRef, ok := refNamesToTrackingRefs[r.Name]
+				if !ok {
+					// This should never happen because git should be returning the same remote ref name
+					// as we provided in the argument to ShowRefs.
+					return nil, fmt.Errorf("unexpected ref returned from show refs: %s", r.Name)
 				}
 
 				firstMatchingRef = o.Some(remoteTrackingRef)

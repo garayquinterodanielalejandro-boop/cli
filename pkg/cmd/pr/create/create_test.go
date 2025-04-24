@@ -1773,6 +1773,93 @@ func TestRemoteGuessing(t *testing.T) {
 	// SHA that matches the HEAD ref in the `git show-ref` output.
 }
 
+func TestRemoteGuessingWithRemoteAndBranchContainingSlashes(t *testing.T) {
+	// Given git config does not provide the necessary info to determine a remote
+	cs, cmdTeardown := run.Stub()
+	defer cmdTeardown(t)
+
+	cs.Register(`git status --porcelain`, 0, "")
+	cs.Register(`git config --get-regexp \^branch\\\..+\\\.\(remote\|merge\|pushremote\|gh-merge-base\)\$`, 0, "")
+	cs.Register(`git rev-parse --symbolic-full-name my/feature@{push}`, 0, "refs/remotes/my/origin/my/feature")
+	cs.Register("git config remote.pushDefault", 1, "")
+	cs.Register("git config push.default", 1, "")
+
+	// And Given there is a remote on a SHA that matches the current HEAD
+	cs.Register(`git show-ref --verify -- HEAD refs/remotes/my/upstream/my/feature refs/remotes/my/origin/my/feature`, 0, heredoc.Doc(`
+	deadbeef HEAD
+	deadb00f refs/remotes/my/upstream/my/feature
+	deadbeef refs/remotes/my/origin/my/feature`))
+
+	// When the command is run
+	reg := &httpmock.Registry{}
+	reg.StubRepoInfoResponse("OWNER", "REPO", "master")
+	defer reg.Verify(t)
+
+	reg.Register(
+		httpmock.GraphQL(`mutation PullRequestCreate\b`),
+		httpmock.GraphQLMutation(`
+				{ "data": { "createPullRequest": { "pullRequest": {
+					"URL": "https://github.com/OWNER/REPO/pull/12"
+				} } } }`, func(input map[string]interface{}) {
+			assert.Equal(t, "REPOID", input["repositoryId"].(string))
+			assert.Equal(t, "master", input["baseRefName"].(string))
+			assert.Equal(t, "OTHEROWNER:my/feature", input["headRefName"].(string))
+		}))
+
+	ios, _, _, _ := iostreams.Test()
+
+	opts := CreateOptions{
+		HttpClient: func() (*http.Client, error) {
+			return &http.Client{Transport: reg}, nil
+		},
+		Config: func() (gh.Config, error) {
+			return config.NewBlankConfig(), nil
+		},
+		Browser:  &browser.Stub{},
+		IO:       ios,
+		Prompter: &prompter.PrompterMock{},
+		GitClient: &git.Client{
+			GhPath:  "some/path/gh",
+			GitPath: "some/path/git",
+		},
+		Finder: shared.NewMockFinder("my/feature", nil, nil),
+		Remotes: func() (context.Remotes, error) {
+			return context.Remotes{
+				{
+					Remote: &git.Remote{
+						Name:     "my/upstream",
+						Resolved: "base",
+					},
+					Repo: ghrepo.New("OWNER", "REPO"),
+				},
+				{
+					Remote: &git.Remote{
+						Name: "my/origin",
+					},
+					Repo: ghrepo.New("OTHEROWNER", "REPO-FORK"),
+				},
+			}, nil
+		},
+		Branch: func() (string, error) {
+			return "my/feature", nil
+		},
+
+		TitleProvided: true,
+		BodyProvided:  true,
+		Title:         "my title",
+		Body:          "my body",
+	}
+
+	require.NoError(t, createRun(&opts))
+
+	// Then guessed remote is used for the PR head,
+	// which annoyingly, is asserted above on the line:
+	// assert.Equal(t, "OTHEROWNER:feature", input["headRefName"].(string))
+	//
+	// This is because OTHEROWNER relates to the "origin" remote, which has a
+	// SHA that matches the HEAD ref in the `git show-ref` output.
+}
+
 func TestNoRepoCanBeDetermined(t *testing.T) {
 	// Given no head repo can be determined from git config
 	cs, cmdTeardown := run.Stub()
