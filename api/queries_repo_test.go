@@ -187,7 +187,7 @@ func Test_RepoMetadata(t *testing.T) {
 
 	expectedProjectIDs := []string{"TRIAGEID", "ROADMAPID"}
 	expectedProjectV2IDs := []string{"TRIAGEV2ID", "ROADMAPV2ID", "MONALISAV2ID"}
-	projectIDs, projectV2IDs, err := result.ProjectsToIDs([]string{"triage", "roadmap", "triagev2", "roadmapv2", "monalisav2"})
+	projectIDs, projectV2IDs, err := result.ProjectsTitlesToIDs([]string{"triage", "roadmap", "triagev2", "roadmapv2", "monalisav2"})
 	if err != nil {
 		t.Errorf("error resolving projects: %v", err)
 	}
@@ -273,7 +273,7 @@ func Test_ProjectNamesToPaths(t *testing.T) {
 		} } } }
 		`))
 
-		projectPaths, err := ProjectNamesToPaths(client, repo, []string{"Triage", "Roadmap", "TriageV2", "RoadmapV2", "MonalisaV2"}, gh.ProjectsV1Supported)
+		projectPaths, err := ProjectTitlesToPaths(client, repo, []string{"Triage", "Roadmap", "TriageV2", "RoadmapV2", "MonalisaV2"}, gh.ProjectsV1Supported)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -331,7 +331,7 @@ func Test_ProjectNamesToPaths(t *testing.T) {
 		} } } }
 		`))
 
-		projectPaths, err := ProjectNamesToPaths(client, repo, []string{"TriageV2", "RoadmapV2", "MonalisaV2"}, gh.ProjectsV1Unsupported)
+		projectPaths, err := ProjectTitlesToPaths(client, repo, []string{"TriageV2", "RoadmapV2", "MonalisaV2"}, gh.ProjectsV1Unsupported)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -374,7 +374,7 @@ func Test_ProjectNamesToPaths(t *testing.T) {
 		} } } }
 		`))
 
-		_, err := ProjectNamesToPaths(client, repo, []string{"TriageV2"}, gh.ProjectsV1Unsupported)
+		_, err := ProjectTitlesToPaths(client, repo, []string{"TriageV2"}, gh.ProjectsV1Unsupported)
 		require.Equal(t, err, fmt.Errorf("'TriageV2' not found"))
 	})
 }

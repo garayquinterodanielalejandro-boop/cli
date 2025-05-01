@@ -738,34 +738,37 @@ func (m *RepoMetadataResult) LabelsToIDs(names []string) ([]string, error) {
 	return ids, nil
 }
 
-// ProjectsToIDs returns two arrays:
+// ProjectsTitlesToIDs returns two arrays:
 // - the first contains IDs of projects V1
 // - the second contains IDs of projects V2
 // - if neither project V1 or project V2 can be found with a given name, then an error is returned
-func (m *RepoMetadataResult) ProjectsToIDs(names []string) ([]string, []string, error) {
+func (m *RepoMetadataResult) ProjectsTitlesToIDs(titles []string) ([]string, []string, error) {
 	var ids []string
 	var idsV2 []string
-	for _, projectName := range names {
-		id, found := m.projectNameToID(projectName)
+	for _, title := range titles {
+		id, found := m.v1ProjectNameToID(title)
 		if found {
 			ids = append(ids, id)
 			continue
 		}
 
-		idV2, found := m.projectV2TitleToID(projectName)
+		idV2, found := m.v2ProjectTitleToID(title)
 		if found {
 			idsV2 = append(idsV2, idV2)
 			continue
 		}
 
-		return nil, nil, fmt.Errorf("'%s' not found", projectName)
+		return nil, nil, fmt.Errorf("'%s' not found", title)
 	}
 	return ids, idsV2, nil
 }
 
-func (m *RepoMetadataResult) projectNameToID(projectName string) (string, bool) {
+// We use the word "titles" when referring to v1 and v2 projects.
+// In reality, v1 projects really have "names", so there is a bit of a
+// mismatch we just need to gloss over.
+func (m *RepoMetadataResult) v1ProjectNameToID(name string) (string, bool) {
 	for _, p := range m.Projects {
-		if strings.EqualFold(projectName, p.Name) {
+		if strings.EqualFold(name, p.Name) {
 			return p.ID, true
 		}
 	}
@@ -773,9 +776,9 @@ func (m *RepoMetadataResult) projectNameToID(projectName string) (string, bool) 
 	return "", false
 }
 
-func (m *RepoMetadataResult) projectV2TitleToID(projectTitle string) (string, bool) {
+func (m *RepoMetadataResult) v2ProjectTitleToID(title string) (string, bool) {
 	for _, p := range m.ProjectsV2 {
-		if strings.EqualFold(projectTitle, p.Title) {
+		if strings.EqualFold(title, p.Title) {
 			return p.ID, true
 		}
 	}
@@ -783,8 +786,8 @@ func (m *RepoMetadataResult) projectV2TitleToID(projectTitle string) (string, bo
 	return "", false
 }
 
-func ProjectNamesToPaths(client *Client, repo ghrepo.Interface, projectNames []string, projectsV1Support gh.ProjectsV1Support) ([]string, error) {
-	paths := make([]string, 0, len(projectNames))
+func ProjectTitlesToPaths(client *Client, repo ghrepo.Interface, titles []string, projectsV1Support gh.ProjectsV1Support) ([]string, error) {
+	paths := make([]string, 0, len(titles))
 	matchedPaths := map[string]struct{}{}
 
 	// TODO: ProjectsV1Cleanup
@@ -796,9 +799,9 @@ func ProjectNamesToPaths(client *Client, repo ghrepo.Interface, projectNames []s
 			return nil, err
 		}
 
-		for _, projectName := range projectNames {
+		for _, title := range titles {
 			for _, p := range v1Projects {
-				if strings.EqualFold(projectName, p.Name) {
+				if strings.EqualFold(title, p.Name) {
 					pathParts := strings.Split(p.ResourcePath, "/")
 					var path string
 					if pathParts[1] == "orgs" || pathParts[1] == "users" {
@@ -807,7 +810,7 @@ func ProjectNamesToPaths(client *Client, repo ghrepo.Interface, projectNames []s
 						path = fmt.Sprintf("%s/%s/%s", pathParts[1], pathParts[2], pathParts[4])
 					}
 					paths = append(paths, path)
-					matchedPaths[projectName] = struct{}{}
+					matchedPaths[title] = struct{}{}
 					break
 				}
 			}
@@ -820,15 +823,15 @@ func ProjectNamesToPaths(client *Client, repo ghrepo.Interface, projectNames []s
 		return nil, err
 	}
 
-	for _, projectName := range projectNames {
+	for _, title := range titles {
 		// If we already found a v1 project with this name, skip it
-		if _, ok := matchedPaths[projectName]; ok {
+		if _, ok := matchedPaths[title]; ok {
 			continue
 		}
 
 		found := false
 		for _, p := range v2Projects {
-			if strings.EqualFold(projectName, p.Title) {
+			if strings.EqualFold(title, p.Title) {
 				pathParts := strings.Split(p.ResourcePath, "/")
 				var path string
 				if pathParts[1] == "orgs" || pathParts[1] == "users" {
@@ -843,7 +846,7 @@ func ProjectNamesToPaths(client *Client, repo ghrepo.Interface, projectNames []s
 		}
 
 		if !found {
-			return nil, fmt.Errorf("'%s' not found", projectName)
+			return nil, fmt.Errorf("'%s' not found", title)
 		}
 	}
 

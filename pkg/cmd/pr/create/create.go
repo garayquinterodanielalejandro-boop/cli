@@ -18,6 +18,7 @@ import (
 	ghContext "github.com/cli/cli/v2/context"
 	"github.com/cli/cli/v2/git"
 	"github.com/cli/cli/v2/internal/browser"
+	fd "github.com/cli/cli/v2/internal/featuredetection"
 	"github.com/cli/cli/v2/internal/gh"
 	"github.com/cli/cli/v2/internal/ghrepo"
 	"github.com/cli/cli/v2/internal/text"
@@ -31,6 +32,7 @@ import (
 
 type CreateOptions struct {
 	// This struct stores user input and factory functions
+	Detector         fd.Detector
 	HttpClient       func() (*http.Client, error)
 	GitClient        *git.Client
 	Config           func() (gh.Config, error)
@@ -363,6 +365,20 @@ func createRun(opts *CreateOptions) error {
 		return err
 	}
 
+	httpClient, err := opts.HttpClient()
+	if err != nil {
+		return err
+	}
+
+	// TODO projectsV1Deprecation
+	// Remove this section as we should no longer need to detect
+	if opts.Detector == nil {
+		cachedClient := api.NewCachedHTTPClient(httpClient, time.Hour*24)
+		opts.Detector = fd.NewDetector(cachedClient, ctx.PRRefs.BaseRepo().RepoHost())
+	}
+
+	projectsV1Support := opts.Detector.ProjectsV1()
+
 	client := ctx.Client
 
 	state, err := NewIssueState(*ctx, *opts)
@@ -384,7 +400,7 @@ func createRun(opts *CreateOptions) error {
 		if err != nil {
 			return err
 		}
-		openURL, err = generateCompareURL(*ctx, *state)
+		openURL, err = generateCompareURL(*ctx, *state, gh.ProjectsV1Supported)
 		if err != nil {
 			return err
 		}
@@ -441,7 +457,7 @@ func createRun(opts *CreateOptions) error {
 			return err
 		}
 		// TODO wm: revisit project support
-		return submitPR(*opts, *ctx, *state, gh.ProjectsV1Supported)
+		return submitPR(*opts, *ctx, *state, projectsV1Support)
 	}
 
 	if opts.RecoverFile != "" {
@@ -518,7 +534,7 @@ func createRun(opts *CreateOptions) error {
 			}
 		}
 
-		openURL, err = generateCompareURL(*ctx, *state)
+		openURL, err = generateCompareURL(*ctx, *state, gh.ProjectsV1Supported)
 		if err != nil {
 			return err
 		}
@@ -568,12 +584,12 @@ func createRun(opts *CreateOptions) error {
 	if action == shared.SubmitDraftAction {
 		state.Draft = true
 		// TODO wm: revisit project support
-		return submitPR(*opts, *ctx, *state, gh.ProjectsV1Supported)
+		return submitPR(*opts, *ctx, *state, projectsV1Support)
 	}
 
 	if action == shared.SubmitAction {
 		// TODO wm: revisit project support
-		return submitPR(*opts, *ctx, *state, gh.ProjectsV1Supported)
+		return submitPR(*opts, *ctx, *state, projectsV1Support)
 	}
 
 	err = errors.New("expected to cancel, preview, or submit")
@@ -1216,13 +1232,13 @@ func handlePush(opts CreateOptions, ctx CreateContext) error {
 	return pushBranch()
 }
 
-func generateCompareURL(ctx CreateContext, state shared.IssueMetadataState) (string, error) {
+func generateCompareURL(ctx CreateContext, state shared.IssueMetadataState, projectsV1Support gh.ProjectsV1Support) (string, error) {
 	u := ghrepo.GenerateRepoURL(
 		ctx.PRRefs.BaseRepo(),
 		"compare/%s...%s?expand=1",
 		url.PathEscape(ctx.PRRefs.BaseRef()), url.PathEscape(ctx.PRRefs.QualifiedHeadRef()))
 	// TODO wm: revisit project support
-	url, err := shared.WithPrAndIssueQueryParams(ctx.Client, ctx.PRRefs.BaseRepo(), u, state, gh.ProjectsV1Supported)
+	url, err := shared.WithPrAndIssueQueryParams(ctx.Client, ctx.PRRefs.BaseRepo(), u, state, projectsV1Support)
 	if err != nil {
 		return "", err
 	}

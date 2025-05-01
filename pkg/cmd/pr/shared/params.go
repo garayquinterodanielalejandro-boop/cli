@@ -36,7 +36,7 @@ func WithPrAndIssueQueryParams(client *api.Client, baseRepo ghrepo.Interface, ba
 		q.Set("labels", strings.Join(state.Labels, ","))
 	}
 	if len(state.ProjectTitles) > 0 {
-		projectPaths, err := api.ProjectNamesToPaths(client, baseRepo, state.ProjectTitles, projectsV1Support)
+		projectPaths, err := api.ProjectTitlesToPaths(client, baseRepo, state.ProjectTitles, projectsV1Support)
 		if err != nil {
 			return "", fmt.Errorf("could not add to project: %w", err)
 		}
@@ -119,7 +119,7 @@ func AddMetadataToIssueParams(client *api.Client, baseRepo ghrepo.Interface, par
 	}
 	params["labelIds"] = labelIDs
 
-	projectIDs, projectV2IDs, err := tb.MetadataResult.ProjectsToIDs(tb.ProjectTitles)
+	projectIDs, projectV2IDs, err := tb.MetadataResult.ProjectsTitlesToIDs(tb.ProjectTitles)
 	if err != nil {
 		return fmt.Errorf("could not add to project: %w", err)
 	}

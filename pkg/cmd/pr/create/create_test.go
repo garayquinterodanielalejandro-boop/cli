@@ -15,6 +15,7 @@ import (
 	"github.com/cli/cli/v2/git"
 	"github.com/cli/cli/v2/internal/browser"
 	"github.com/cli/cli/v2/internal/config"
+	fd "github.com/cli/cli/v2/internal/featuredetection"
 	"github.com/cli/cli/v2/internal/gh"
 	"github.com/cli/cli/v2/internal/ghrepo"
 	"github.com/cli/cli/v2/internal/prompter"
@@ -1618,6 +1619,7 @@ func Test_createRun(t *testing.T) {
 			}
 
 			opts := CreateOptions{}
+			opts.Detector = &fd.EnabledDetectorMock{}
 			opts.Prompter = pm
 
 			ios, _, stdout, stderr := iostreams.Test()
@@ -1941,7 +1943,8 @@ func Test_generateCompareURL(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := generateCompareURL(tt.ctx, tt.state)
+			// TODO dm: projects v1 support?
+			got, err := generateCompareURL(tt.ctx, tt.state, gh.ProjectsV1Supported)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("generateCompareURL() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -2009,3 +2012,119 @@ func mockRetrieveProjects(_ *testing.T, reg *httpmock.Registry) {
 }
 
 // TODO interactive metadata tests once: 1) we have test utils for Prompter and 2) metadata questions use Prompter
+
+// TODO projectsV1Deprecation
+// Remove this test.
+func TestProjectsV1Deprecation(t *testing.T) {
+
+	t.Run("non-interactive submission", func(t *testing.T) {
+		t.Run("when projects v1 is supported, queries for it", func(t *testing.T) {
+			ios, _, _, _ := iostreams.Test()
+
+			reg := &httpmock.Registry{}
+			reg.StubRepoInfoResponse("OWNER", "REPO", "main")
+			reg.Register(
+				// ( is required to avoid matching projectsV2
+				httpmock.GraphQL(`projects\(`),
+				// Simulate a GraphQL error to early exit the test.
+				httpmock.StatusStringResponse(500, ""),
+			)
+
+			cs, cmdTeardown := run.Stub()
+			defer cmdTeardown(t)
+
+			cs.Register(`git config --get-regexp \^branch\\\..+\\\.\(remote\|merge\|pushremote\|gh-merge-base\)\$`, 0, "")
+
+			// Ignore the error because we have no way to really stub it without
+			// fully stubbing a GQL error structure in the request body.
+			_ = createRun(&CreateOptions{
+				Detector: &fd.EnabledDetectorMock{},
+				IO:       ios,
+				HttpClient: func() (*http.Client, error) {
+					return &http.Client{Transport: reg}, nil
+				},
+				GitClient: &git.Client{
+					GhPath:  "some/path/gh",
+					GitPath: "some/path/git",
+				},
+				Remotes: func() (context.Remotes, error) {
+					return context.Remotes{
+						{
+							Remote: &git.Remote{
+								Name:     "upstream",
+								Resolved: "base",
+							},
+							Repo: ghrepo.New("OWNER", "REPO"),
+						},
+					}, nil
+				},
+				Finder: shared.NewMockFinder("feature", nil, nil),
+
+				HeadBranch: "feature",
+
+				TitleProvided: true,
+				BodyProvided:  true,
+				Title:         "Test Title",
+				Body:          "Test Body",
+
+				// Required to force a lookup of projects
+				Projects: []string{"Project"},
+			})
+
+			// Verify that our request contained projects
+			reg.Verify(t)
+		})
+
+		t.Run("when projects v1 is not supported, does not query for it", func(t *testing.T) {
+			ios, _, _, _ := iostreams.Test()
+
+			reg := &httpmock.Registry{}
+			reg.StubRepoInfoResponse("OWNER", "REPO", "main")
+			// ( is required to avoid matching projectsV2
+			reg.Exclude(t, httpmock.GraphQL(`projects\(`))
+
+			cs, cmdTeardown := run.Stub()
+			defer cmdTeardown(t)
+
+			cs.Register(`git config --get-regexp \^branch\\\..+\\\.\(remote\|merge\|pushremote\|gh-merge-base\)\$`, 0, "")
+
+			// Ignore the error because we're not really interested in it.
+			_ = createRun(&CreateOptions{
+				Detector: &fd.DisabledDetectorMock{},
+				IO:       ios,
+				HttpClient: func() (*http.Client, error) {
+					return &http.Client{Transport: reg}, nil
+				},
+				GitClient: &git.Client{
+					GhPath:  "some/path/gh",
+					GitPath: "some/path/git",
+				},
+				Remotes: func() (context.Remotes, error) {
+					return context.Remotes{
+						{
+							Remote: &git.Remote{
+								Name:     "upstream",
+								Resolved: "base",
+							},
+							Repo: ghrepo.New("OWNER", "REPO"),
+						},
+					}, nil
+				},
+				Finder: shared.NewMockFinder("feature", nil, nil),
+
+				HeadBranch: "feature",
+
+				TitleProvided: true,
+				BodyProvided:  true,
+				Title:         "Test Title",
+				Body:          "Test Body",
+
+				// Required to force a lookup of projects
+				Projects: []string{"Project"},
+			})
+
+			// Verify that our request contained projectCards
+			reg.Verify(t)
+		})
+	})
+}
