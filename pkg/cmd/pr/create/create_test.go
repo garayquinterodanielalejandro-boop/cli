@@ -2127,4 +2127,119 @@ func TestProjectsV1Deprecation(t *testing.T) {
 			reg.Verify(t)
 		})
 	})
+
+	t.Run("web mode", func(t *testing.T) {
+		t.Run("when projects v1 is supported, queries for it", func(t *testing.T) {
+			ios, _, _, _ := iostreams.Test()
+
+			reg := &httpmock.Registry{}
+			reg.StubRepoInfoResponse("OWNER", "REPO", "main")
+			reg.Register(
+				// ( is required to avoid matching projectsV2
+				httpmock.GraphQL(`projects\(`),
+				// Simulate a GraphQL error to early exit the test.
+				httpmock.StatusStringResponse(500, ""),
+			)
+
+			cs, cmdTeardown := run.Stub()
+			defer cmdTeardown(t)
+
+			cs.Register(`git config --get-regexp \^branch\\\..+\\\.\(remote\|merge\|pushremote\|gh-merge-base\)\$`, 0, "")
+
+			// Ignore the error because we have no way to really stub it without
+			// fully stubbing a GQL error structure in the request body.
+			_ = createRun(&CreateOptions{
+				Detector: &fd.EnabledDetectorMock{},
+				IO:       ios,
+				HttpClient: func() (*http.Client, error) {
+					return &http.Client{Transport: reg}, nil
+				},
+				GitClient: &git.Client{
+					GhPath:  "some/path/gh",
+					GitPath: "some/path/git",
+				},
+				Remotes: func() (context.Remotes, error) {
+					return context.Remotes{
+						{
+							Remote: &git.Remote{
+								Name:     "upstream",
+								Resolved: "base",
+							},
+							Repo: ghrepo.New("OWNER", "REPO"),
+						},
+					}, nil
+				},
+				Finder: shared.NewMockFinder("feature", nil, nil),
+
+				WebMode: true,
+
+				HeadBranch: "feature",
+
+				TitleProvided: true,
+				BodyProvided:  true,
+				Title:         "Test Title",
+				Body:          "Test Body",
+
+				// Required to force a lookup of projects
+				Projects: []string{"Project"},
+			})
+
+			// Verify that our request contained projects
+			reg.Verify(t)
+		})
+
+		t.Run("when projects v1 is not supported, does not query for it", func(t *testing.T) {
+			ios, _, _, _ := iostreams.Test()
+
+			reg := &httpmock.Registry{}
+			reg.StubRepoInfoResponse("OWNER", "REPO", "main")
+			// ( is required to avoid matching projectsV2
+			reg.Exclude(t, httpmock.GraphQL(`projects\(`))
+
+			cs, cmdTeardown := run.Stub()
+			defer cmdTeardown(t)
+
+			cs.Register(`git config --get-regexp \^branch\\\..+\\\.\(remote\|merge\|pushremote\|gh-merge-base\)\$`, 0, "")
+
+			// Ignore the error because we're not really interested in it.
+			_ = createRun(&CreateOptions{
+				Detector: &fd.DisabledDetectorMock{},
+				IO:       ios,
+				HttpClient: func() (*http.Client, error) {
+					return &http.Client{Transport: reg}, nil
+				},
+				GitClient: &git.Client{
+					GhPath:  "some/path/gh",
+					GitPath: "some/path/git",
+				},
+				Remotes: func() (context.Remotes, error) {
+					return context.Remotes{
+						{
+							Remote: &git.Remote{
+								Name:     "upstream",
+								Resolved: "base",
+							},
+							Repo: ghrepo.New("OWNER", "REPO"),
+						},
+					}, nil
+				},
+				Finder: shared.NewMockFinder("feature", nil, nil),
+
+				WebMode: true,
+
+				HeadBranch: "feature",
+
+				TitleProvided: true,
+				BodyProvided:  true,
+				Title:         "Test Title",
+				Body:          "Test Body",
+
+				// Required to force a lookup of projects
+				Projects: []string{"Project"},
+			})
+
+			// Verify that our request contained projectCards
+			reg.Verify(t)
+		})
+	})
 }
