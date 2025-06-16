@@ -12,6 +12,12 @@ if [ -z "$PR_URL" ]; then
     exit 1
 fi
 
+# Skip if PR is from a bot or org member
+if [ "$PR_AUTHOR_TYPE" = "Bot" ] || [ "$PR_AUTHOR_ASSOCIATION" = "MEMBER" ]; then
+    echo "Skipping check for PR #$PR_URL as it is from a bot ($PR_AUTHOR_TYPE) or an org member ($PR_AUTHOR_ASSOCIATION)"
+    exit 0
+fi
+
 # Extract PR number from URL for logging
 PR_NUM="$(basename "$PR_URL")"
 
