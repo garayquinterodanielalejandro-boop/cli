@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -23,7 +24,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const defaultLimit = 40
+const (
+	defaultLimit           = 40
+	defaultLogPollInterval = 5 * time.Second
+)
 
 type ViewOptions struct {
 	IO         *iostreams.IOStreams
@@ -34,10 +38,19 @@ type ViewOptions struct {
 	Prompter   prompter.Prompter
 	Browser    browser.Browser
 
+	Ticker func() (close func(), ch <-chan time.Time)
+
 	SelectorArg string
 	PRNumber    int
 	SessionID   string
 	Web         bool
+	Log         bool
+	Follow      bool
+}
+
+func defaultTicker() (func(), <-chan time.Time) {
+	ticker := time.NewTicker(defaultLogPollInterval)
+	return ticker.Stop, ticker.C
 }
 
 func NewCmdView(f *cmdutil.Factory, runF func(*ViewOptions) error) *cobra.Command {
@@ -47,6 +60,7 @@ func NewCmdView(f *cmdutil.Factory, runF func(*ViewOptions) error) *cobra.Comman
 		CapiClient: shared.CapiClientFunc(f),
 		Prompter:   f.Prompter,
 		Browser:    f.Browser,
+		Ticker:     defaultTicker,
 	}
 
 	cmd := &cobra.Command{
@@ -89,6 +103,10 @@ func NewCmdView(f *cmdutil.Factory, runF func(*ViewOptions) error) *cobra.Comman
 				return fmt.Errorf("session ID is required when not running interactively")
 			}
 
+			if opts.Follow && !opts.Log {
+				return cmdutil.FlagErrorf("--log is required when providing --follow")
+			}
+
 			if opts.Finder == nil {
 				opts.Finder = prShared.NewFinder(f)
 			}
@@ -103,6 +121,8 @@ func NewCmdView(f *cmdutil.Factory, runF func(*ViewOptions) error) *cobra.Comman
 	cmdutil.EnableRepoOverride(cmd, f)
 
 	cmd.Flags().BoolVarP(&opts.Web, "web", "w", false, "Open agent task in the browser")
+	cmd.Flags().BoolVar(&opts.Log, "log", false, "Show agent session logs")
+	cmd.Flags().BoolVar(&opts.Follow, "follow", false, "Follow agent session logs")
 
 	return cmd
 }
@@ -255,10 +275,46 @@ func viewRun(opts *ViewOptions) error {
 		}
 	}
 
-	out := opts.IO.Out
+	printSession(opts.IO.Out, cs, session)
 
+	if opts.Log {
+		if opts.Follow {
+			close, C := opts.Ticker()
+			defer close()
+
+			var called bool
+			fetcher := func() ([]byte, error) {
+				if !called {
+					called = true
+				} else {
+					<-C
+				}
+
+				raw, err := capiClient.GetSessionLogs(ctx, session.ID)
+				if err != nil {
+					return nil, err
+				}
+				return raw, nil
+			}
+
+			return followLogs(fetcher, opts.IO.Out, cs)
+		}
+
+		raw, err := capiClient.GetSessionLogs(ctx, session.ID)
+		if err != nil {
+			return fmt.Errorf("failed to fetch session logs: %w", err)
+		}
+
+		_, err = printLogs(raw, opts.IO.Out, cs)
+		return err
+	}
+
+	return nil
+}
+
+func printSession(w io.Writer, cs *iostreams.ColorScheme, session *capi.Session) {
 	if session.PullRequest != nil {
-		fmt.Fprintf(out, "%s • %s • %s%s\n",
+		fmt.Fprintf(w, "%s • %s • %s%s\n",
 			shared.ColorFuncForSessionState(*session, cs)(shared.SessionStateString(session.State)),
 			cs.Bold(session.PullRequest.Title),
 			session.PullRequest.Repository.NameWithOwner,
@@ -266,25 +322,23 @@ func viewRun(opts *ViewOptions) error {
 		)
 	} else {
 		// This can happen when the session is just created and a PR is not yet available for it
-		fmt.Fprintf(out, "%s\n", shared.ColorFuncForSessionState(*session, cs)(shared.SessionStateString(session.State)))
+		fmt.Fprintf(w, "%s\n", shared.ColorFuncForSessionState(*session, cs)(shared.SessionStateString(session.State)))
 	}
 
 	if session.User != nil {
-		fmt.Fprintf(out, "Started on behalf of %s %s\n", session.User.Login, text.FuzzyAgo(time.Now(), session.CreatedAt))
+		fmt.Fprintf(w, "Started on behalf of %s %s\n", session.User.Login, text.FuzzyAgo(time.Now(), session.CreatedAt))
 	} else {
 		// Should never happen, but we need to cover the path
-		fmt.Fprintf(out, "Started %s\n", text.FuzzyAgo(time.Now(), session.CreatedAt))
+		fmt.Fprintf(w, "Started %s\n", text.FuzzyAgo(time.Now(), session.CreatedAt))
 	}
 
 	// TODO(babakks): uncomment when we have the --logs option ready
-	// fmt.Fprintln(out, "")
-	// fmt.Fprintf(out, "For the detailed session logs, try: gh agent-task view '%s' --logs\n", opts.SelectorArg)
+	// fmt.Fprintln(w, "")
+	// fmt.Fprintf(w, "For the detailed session logs, try: gh agent-task view '%s' --logs\n", session.ID)
 
 	if session.PullRequest != nil {
-		fmt.Fprintln(out, "")
-		fmt.Fprintln(out, cs.Muted("View this session on GitHub:"))
-		fmt.Fprintln(out, cs.Muted(fmt.Sprintf("%s/agent-sessions/%s", session.PullRequest.URL, url.PathEscape(session.ID))))
+		fmt.Fprintln(w, "")
+		fmt.Fprintln(w, cs.Muted("View this session on GitHub:"))
+		fmt.Fprintln(w, cs.Muted(fmt.Sprintf("%s/agent-sessions/%s", session.PullRequest.URL, url.PathEscape(session.ID))))
 	}
-
-	return nil
 }
