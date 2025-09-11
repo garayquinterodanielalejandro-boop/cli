@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"slices"
@@ -238,6 +239,35 @@ func (c *CAPIClient) GetSession(ctx context.Context, id string) (*Session, error
 	}
 
 	return sessions[0], nil
+}
+
+// GetSession retrieves logs of an agent session identified by ID.
+func (c *CAPIClient) GetSessionLogs(ctx context.Context, id string) ([]byte, error) {
+	if id == "" {
+		return nil, fmt.Errorf("missing session ID")
+	}
+
+	url := fmt.Sprintf("%s/agents/sessions/%s/logs", baseCAPIURL, url.PathEscape(id))
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
+	if err != nil {
+		return nil, err
+	}
+
+	res, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		if res.StatusCode == http.StatusNotFound {
+			return nil, ErrSessionNotFound
+		}
+		return nil, fmt.Errorf("failed to get session: %s", res.Status)
+	}
+
+	return io.ReadAll(res.Body)
 }
 
 // ListSessionsByResourceID retrieves sessions associated with the given resource type and ID.

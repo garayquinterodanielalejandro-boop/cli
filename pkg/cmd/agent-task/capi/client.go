@@ -20,6 +20,7 @@ type CapiClient interface {
 	CreateJob(ctx context.Context, owner, repo, problemStatement, baseBranch string) (*Job, error)
 	GetJob(ctx context.Context, owner, repo, jobID string) (*Job, error)
 	GetSession(ctx context.Context, id string) (*Session, error)
+	GetSessionLogs(ctx context.Context, id string) ([]byte, error)
 	ListSessionsByResourceID(ctx context.Context, resourceType string, resourceID int64, limit int) ([]*Session, error)
 	GetPullRequestDatabaseID(ctx context.Context, hostname string, owner string, repo string, number int) (int64, string, error)
 }

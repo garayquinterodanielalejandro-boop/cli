@@ -30,6 +30,9 @@ var _ CapiClient = &CapiClientMock{}
 //			GetSessionFunc: func(ctx context.Context, id string) (*Session, error) {
 //				panic("mock out the GetSession method")
 //			},
+//			GetSessionLogsFunc: func(ctx context.Context, id string) ([]byte, error) {
+//				panic("mock out the GetSessionLogs method")
+//			},
 //			ListSessionsByResourceIDFunc: func(ctx context.Context, resourceType string, resourceID int64, limit int) ([]*Session, error) {
 //				panic("mock out the ListSessionsByResourceID method")
 //			},
@@ -57,6 +60,9 @@ type CapiClientMock struct {
 
 	// GetSessionFunc mocks the GetSession method.
 	GetSessionFunc func(ctx context.Context, id string) (*Session, error)
+
+	// GetSessionLogsFunc mocks the GetSessionLogs method.
+	GetSessionLogsFunc func(ctx context.Context, id string) ([]byte, error)
 
 	// ListSessionsByResourceIDFunc mocks the ListSessionsByResourceID method.
 	ListSessionsByResourceIDFunc func(ctx context.Context, resourceType string, resourceID int64, limit int) ([]*Session, error)
@@ -113,6 +119,13 @@ type CapiClientMock struct {
 			// ID is the id argument value.
 			ID string
 		}
+		// GetSessionLogs holds details about calls to the GetSessionLogs method.
+		GetSessionLogs []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// ID is the id argument value.
+			ID string
+		}
 		// ListSessionsByResourceID holds details about calls to the ListSessionsByResourceID method.
 		ListSessionsByResourceID []struct {
 			// Ctx is the ctx argument value.
@@ -147,6 +160,7 @@ type CapiClientMock struct {
 	lockGetJob                   sync.RWMutex
 	lockGetPullRequestDatabaseID sync.RWMutex
 	lockGetSession               sync.RWMutex
+	lockGetSessionLogs           sync.RWMutex
 	lockListSessionsByResourceID sync.RWMutex
 	lockListSessionsForRepo      sync.RWMutex
 	lockListSessionsForViewer    sync.RWMutex
@@ -325,6 +339,42 @@ func (mock *CapiClientMock) GetSessionCalls() []struct {
 	mock.lockGetSession.RLock()
 	calls = mock.calls.GetSession
 	mock.lockGetSession.RUnlock()
+	return calls
+}
+
+// GetSessionLogs calls GetSessionLogsFunc.
+func (mock *CapiClientMock) GetSessionLogs(ctx context.Context, id string) ([]byte, error) {
+	if mock.GetSessionLogsFunc == nil {
+		panic("CapiClientMock.GetSessionLogsFunc: method is nil but CapiClient.GetSessionLogs was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		ID  string
+	}{
+		Ctx: ctx,
+		ID:  id,
+	}
+	mock.lockGetSessionLogs.Lock()
+	mock.calls.GetSessionLogs = append(mock.calls.GetSessionLogs, callInfo)
+	mock.lockGetSessionLogs.Unlock()
+	return mock.GetSessionLogsFunc(ctx, id)
+}
+
+// GetSessionLogsCalls gets all the calls that were made to GetSessionLogs.
+// Check the length with:
+//
+//	len(mockedCapiClient.GetSessionLogsCalls())
+func (mock *CapiClientMock) GetSessionLogsCalls() []struct {
+	Ctx context.Context
+	ID  string
+} {
+	var calls []struct {
+		Ctx context.Context
+		ID  string
+	}
+	mock.lockGetSessionLogs.RLock()
+	calls = mock.calls.GetSessionLogs
+	mock.lockGetSessionLogs.RUnlock()
 	return calls
 }
 
