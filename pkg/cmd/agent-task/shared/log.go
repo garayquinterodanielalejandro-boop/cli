@@ -60,11 +60,16 @@ func (r *logRenderer) Render(logs []byte, w io.Writer, cs *iostreams.ColorScheme
 			return false, errors.New("unexpected log format")
 		}
 
-		// TODO: should ignore the error since the entries can be different.
-		var entry logEntry
+		// The only log entry type we're interested in is a chat completion chunk,
+		// which can be verified by a successful unmarshal into the corresponding
+		// type AND the Object field being equal to "chat.completion.chunk". The
+		// latter is to avoid accepting an empty JSON object (i.e. "{}"). Also,
+		// if the entry is not what we expect, we should just skip and avoid
+		// returning an error.
+		var entry chatCompletionChunkEntry
 		err := json.Unmarshal([]byte(raw), &entry)
-		if err != nil {
-			return false, fmt.Errorf("unexpected log entry: %w", err)
+		if err != nil || entry.Object != "chat.completion.chunk" {
+			continue
 		}
 
 		if stop, err := renderLogEntry(entry, w, cs); err != nil {
@@ -77,42 +82,53 @@ func (r *logRenderer) Render(logs []byte, w io.Writer, cs *iostreams.ColorScheme
 	return false, nil
 }
 
-func renderLogEntry(entry logEntry, w io.Writer, cs *iostreams.ColorScheme) (bool, error) {
+func renderLogEntry(entry chatCompletionChunkEntry, w io.Writer, cs *iostreams.ColorScheme) (bool, error) {
 	var stop bool
 	for _, choice := range entry.Choices {
 		if choice.FinishReason == "stop" {
 			stop = true
 		}
 
-		if choice.Delta.Content == "" {
-			continue
-		}
-
-		if choice.Delta.Role != "" && choice.Delta.Role != "assistant" {
-			// Because...
-			continue
-		}
-
-		if choice.Delta.ToolCalls == nil {
-			// message
-			fmt.Fprintln(w, "")
-			if _, err := fmt.Fprintf(w, "> %s\n", choice.Delta.Content); err != nil {
-				return false, err
+		if len(choice.Delta.ToolCalls) == 0 {
+			if choice.Delta.Content != "" && choice.Delta.Role == "assistant" {
+				// Copilot message and we should display.
+				renderCopilotMessage(w, cs, choice.Delta.Content)
 			}
 			continue
 		}
 
+		// Since we don't want to clear-and-reprint live progress of events, we
+		// need to only process entries that correspond to a finished tool call.
+		// Such entries have a non-empty Content field.
+		if choice.Delta.Content == "" {
+			continue
+		}
+
+		if choice.Delta.ReasoningText != "" {
+			// Note that this should be formatted as a normal Copilot message.
+			renderCopilotMessage(w, cs, choice.Delta.ReasoningText)
+		}
+
+		render := func(s string) {
+			_, _ = fmt.Fprintf(w, "%s\n", s)
+		}
+
 		for _, tc := range choice.Delta.ToolCalls {
-			fmt.Fprintln(w, "")
-			switch tc.Function.Name {
+			name := tc.Function.Name
+			if name == "" {
+				continue
+			}
+
+			args := tc.Function.Arguments
+
+			switch name {
 			case "run_setup":
-				args := toolCallRunSetup{}
-				if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
-					return false, fmt.Errorf("failed to parse 'run_setup' tool call arguments: %w", err)
+				if v := unmarshal[runSetupToolArgs](args); v != nil {
+					render(v.Name) // e.g. "Start 'github-mcp-server' MCP server"
+					continue
 				}
-				fmt.Fprintf(w, "- %s\n", cs.Bold(args.Name))
 			case "view":
-				args := toolCallView{}
+				args := viewToolArgs{}
 				if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
 					return false, fmt.Errorf("failed to parse 'view' tool call arguments: %w", err)
 				}
@@ -120,60 +136,124 @@ func renderLogEntry(entry logEntry, w io.Writer, cs *iostreams.ColorScheme) (boo
 				// NOTE: omit the output since it's a git diff
 				fmt.Fprintf(w, "- View %s\n", cs.Bold(args.Path))
 			case "bash":
-				args := toolCallBash{}
-				if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
-					return false, fmt.Errorf("failed to parse 'bash' tool call arguments: %w", err)
+				if v := unmarshal[bashToolArgs](args); v != nil {
+					if v.Description != "" {
+						render("Bash: " + cs.Bold(v.Description))
+					} else {
+						render("Run Bash command")
+					}
+					continue
 				}
-				// NOTE: omit the delta.content to reduce noise
-				fmt.Fprintf(w, "- Bash: %s\n", cs.Bold(args.Description))
+			case "write_bash":
+				if v := unmarshal[writeBashToolArgs](args); v != nil {
+					render("Send input to Bash session " + v.SessionID)
+					continue
+				}
+			case "read_bash":
+				if v := unmarshal[readBashToolArgs](args); v != nil {
+					render("Read logs from Bash session " + v.SessionID)
+					continue
+				}
+			case "stop_bash":
+				if v := unmarshal[stopBashToolArgs](args); v != nil {
+					render("Stop Bash session " + v.SessionID)
+					continue
+				}
+			case "async_bash":
+				if v := unmarshal[asyncBashToolArgs](args); v != nil {
+					render("Start or send input to long-running Bash session " + v.SessionID)
+					continue
+				}
+			case "read_async_bash":
+				if v := unmarshal[readAsyncBashToolArgs](args); v != nil {
+					render("View logs from long-running Bash session " + v.SessionID)
+					continue
+				}
+			case "stop_async_bash":
+				if v := unmarshal[stopAsyncBashToolArgs](args); v != nil {
+					render("Stop long-running Bash session " + v.SessionID)
+					continue
+				}
 			case "think":
-				args := toolCallThink{}
+				if v := unmarshal[thinkToolArgs](args); v != nil {
+					render("Stop long-running Bash session " + v.SessionID)
+					continue
+				}
+
+				args := thinkToolArgs{}
 				if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
 					return false, fmt.Errorf("failed to parse 'think' tool call arguments: %w", err)
 				}
 				// NOTE: omit the delta.content since it's the same as thought
 				fmt.Fprintf(w, "? %s: %s\n", cs.Bold("Thought:"), args.Thought)
 			case "report_progress":
-				args := toolCallReportProgress{}
+				args := reportProgressToolArgs{}
 				if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
 					return false, fmt.Errorf("failed to parse 'report_progress' tool call arguments: %w", err)
 				}
 				// NOTE: omit the delta.content to reduce noise
 				fmt.Fprintf(w, "! Progress update: %s\n", cs.Bold(args.CommitMessage))
 			case "create":
-				args := toolCallCreate{}
+				args := createToolArgs{}
 				if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
 					return false, fmt.Errorf("failed to parse 'create' tool call arguments: %w", err)
 				}
 				// NOTE: omit the delta.content since it's a diff
 				fmt.Fprintf(w, "- Create %s\n", cs.Bold(args.Path))
 			case "str_replace":
-				args := toolCallStrReplace{}
+				args := strReplaceToolArgs{}
 				if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
 					return false, fmt.Errorf("failed to parse 'str_replace' tool call arguments: %w", err)
 				}
 				// NOTE: omit the delta.content since it's a diff
 				fmt.Fprintf(w, "- Edit %s\n", cs.Bold(args.Path))
-			default:
-				// Unknown tool call. For example for "codeql_checker":
-				// NOTE: omit the delta.content since we don't know how large could that be
-				fmt.Fprintf(w, "- Call to %s\n", cs.Bold(tc.Function.Name))
 			}
+
+			// Unknown tool call. For example for "codeql_checker":
+			// NOTE: omit the delta.content since we don't know how large could that be
+			renderGenericToolCall(w, name)
 		}
 	}
 	return stop, nil
 }
 
-type logEntry struct {
+func unmarshal[T any](raw string) *T {
+	var t T
+	if err := json.Unmarshal([]byte(raw), &t); err != nil {
+		return nil
+	}
+	return &t
+}
+
+func renderCopilotMessage(w io.Writer, message string) {
+	_, _ = fmt.Fprintf(w, "%s\n", message)
+}
+
+func renderToolCall(w io.Writer, name, title string) {
+	if name != "" && title != "" {
+		_, _ = fmt.Fprintf(w, "%s %s\n", name, title)
+	} else if title == "" {
+		_, _ = fmt.Fprintf(w, "%s\n", name)
+	} else {
+		_, _ = fmt.Fprintf(w, "%s\n", title)
+	}
+}
+
+func renderGenericToolCall(w io.Writer, name string) {
+	_, _ = fmt.Fprintf(w, "Call to %s\n", name)
+}
+
+type chatCompletionChunkEntry struct {
 	ID      string `json:"id"`
 	Created int64  `json:"created"`
 	Model   string `json:"model"`
 	Object  string `json:"object"`
 	Choices []struct {
 		Delta struct {
-			Content   string `json:"content"`
-			Role      string `json:"role"`
-			ToolCalls []struct {
+			ReasoningText string `json:"reasoning_text"`
+			Content       string `json:"content"`
+			Role          string `json:"role"`
+			ToolCalls     []struct {
 				Function struct {
 					Name      string `json:"name"`
 					Arguments string `json:"arguments"`
@@ -187,36 +267,59 @@ type logEntry struct {
 	} `json:"choices"`
 }
 
-type toolCallRunSetup struct {
+type runSetupToolArgs struct {
 	Name string `json:"name"`
 }
 
-type toolCallView struct {
-	Path string `json:"path"`
-}
-
-type toolCallBash struct {
-	Async       bool   `json:"async"`
+type bashToolArgs struct {
 	Command     string `json:"command"`
 	Description string `json:"description"`
-	SessionID   string `json:"sessionId"`
 }
 
-type toolCallThink struct {
+type readBashToolArgs struct {
+	SessionID string `json:"sessionId"`
+}
+
+type writeBashToolArgs struct {
+	SessionID string `json:"sessionId"`
+	Input     string `json:"input"`
+}
+
+type stopBashToolArgs struct {
+	SessionID string `json:"sessionId"`
+}
+
+type asyncBashToolArgs struct {
+	Command   string `json:"command"`
+	SessionID string `json:"sessionId"`
+}
+
+type readAsyncBashToolArgs struct {
+	SessionID string `json:"sessionId"`
+}
+
+type stopAsyncBashToolArgs struct {
+	SessionID string `json:"sessionId"`
+}
+
+type viewToolArgs struct {
+	Path string `json:"path"`
+}
+type thinkToolArgs struct {
 	Thought string `json:"thought"`
 }
 
-type toolCallReportProgress struct {
+type reportProgressToolArgs struct {
 	CommitMessage string `json:"commitMessage"`
 	PrDescription string `json:"prDescription"`
 }
 
-type toolCallCreate struct {
+type createToolArgs struct {
 	FileText string `json:"file_text"`
 	Path     string `json:"path"`
 }
 
-type toolCallStrReplace struct {
+type strReplaceToolArgs struct {
 	NewStr string `json:"new_str"`
 	OldStr string `json:"old_str"`
 	Path   string `json:"path"`
