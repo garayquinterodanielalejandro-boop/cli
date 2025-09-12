@@ -14,6 +14,7 @@ import (
 	"github.com/cli/cli/v2/internal/ghrepo"
 	"github.com/cli/cli/v2/internal/prompter"
 	"github.com/cli/cli/v2/pkg/cmd/agent-task/capi"
+	"github.com/cli/cli/v2/pkg/cmd/agent-task/shared"
 	prShared "github.com/cli/cli/v2/pkg/cmd/pr/shared"
 	"github.com/cli/cli/v2/pkg/cmdutil"
 	"github.com/cli/cli/v2/pkg/iostreams"
@@ -79,6 +80,31 @@ func TestNewCmdList(t *testing.T) {
 			},
 		},
 		{
+			name: "with --log",
+			tty:  true,
+			args: "some-arg --log",
+			wantOpts: ViewOptions{
+				SelectorArg: "some-arg",
+				Log:         true,
+			},
+		},
+		{
+			name: "with --log and --follow",
+			tty:  true,
+			args: "some-arg --log --follow",
+			wantOpts: ViewOptions{
+				SelectorArg: "some-arg",
+				Log:         true,
+				Follow:      true,
+			},
+		},
+		{
+			name:    "--follow requires --log",
+			tty:     true,
+			args:    "some-arg --follow",
+			wantErr: "--log is required when providing --follow",
+		},
+		{
 			name: "web mode",
 			tty:  true,
 			args: "some-arg -w",
@@ -135,15 +161,16 @@ func Test_viewRun(t *testing.T) {
 	sampleDate := time.Now().Add(-6 * time.Hour) // 6h ago
 
 	tests := []struct {
-		name           string
-		tty            bool
-		opts           ViewOptions
-		promptStubs    func(*testing.T, *prompter.MockPrompter)
-		capiStubs      func(*testing.T, *capi.CapiClientMock)
-		wantOut        string
-		wantErr        error
-		wantStderr     string
-		wantBrowserURL string
+		name             string
+		tty              bool
+		opts             ViewOptions
+		promptStubs      func(*testing.T, *prompter.MockPrompter)
+		capiStubs        func(*testing.T, *capi.CapiClientMock)
+		logRendererStubs func(*testing.T, *shared.LogRendererMock)
+		wantOut          string
+		wantErr          error
+		wantStderr       string
+		wantBrowserURL   string
 	}{
 		{
 			name: "with session id, not found (tty)",
@@ -206,6 +233,9 @@ func Test_viewRun(t *testing.T) {
 				Completed • fix something • OWNER/REPO#101
 				Started on behalf of octocat about 6 hours ago
 
+				For detailed session logs, try:
+				gh agent-task view 'some-session-id' --log
+
 				View this session on GitHub:
 				https://github.com/OWNER/REPO/pull/101/agent-sessions/some-session-id
 			`),
@@ -240,6 +270,9 @@ func Test_viewRun(t *testing.T) {
 				Completed • fix something • OWNER/REPO#101
 				Started about 6 hours ago
 
+				For detailed session logs, try:
+				gh agent-task view 'some-session-id' --log
+
 				View this session on GitHub:
 				https://github.com/OWNER/REPO/pull/101/agent-sessions/some-session-id
 			`),
@@ -268,6 +301,9 @@ func Test_viewRun(t *testing.T) {
 			wantOut: heredoc.Doc(`
 				Completed
 				Started on behalf of octocat about 6 hours ago
+
+				For detailed session logs, try:
+				gh agent-task view 'some-session-id' --log
 			`),
 		},
 		{
@@ -291,6 +327,9 @@ func Test_viewRun(t *testing.T) {
 			wantOut: heredoc.Doc(`
 				Completed
 				Started about 6 hours ago
+
+				For detailed session logs, try:
+				gh agent-task view 'some-session-id' --log
 			`),
 		},
 		{
@@ -471,6 +510,9 @@ func Test_viewRun(t *testing.T) {
 				Completed • fix something • OWNER/REPO#101
 				Started on behalf of octocat about 6 hours ago
 
+				For detailed session logs, try:
+				gh agent-task view 'some-session-id' --log
+
 				View this session on GitHub:
 				https://github.com/OWNER/REPO/pull/101/agent-sessions/some-session-id
 			`),
@@ -547,6 +589,9 @@ func Test_viewRun(t *testing.T) {
 			wantOut: heredoc.Doc(`
 				Completed • fix something • OWNER/REPO#101
 				Started on behalf of octocat about 6 hours ago
+
+				For detailed session logs, try:
+				gh agent-task view 'some-session-id' --log
 
 				View this session on GitHub:
 				https://github.com/OWNER/REPO/pull/101/agent-sessions/some-session-id
@@ -626,6 +671,9 @@ func Test_viewRun(t *testing.T) {
 			wantOut: heredoc.Doc(`
 				Completed • fix something • OWNER/REPO#101
 				Started on behalf of octocat about 6 hours ago
+
+				For detailed session logs, try:
+				gh agent-task view 'some-session-id' --log
 
 				View this session on GitHub:
 				https://github.com/OWNER/REPO/pull/101/agent-sessions/some-session-id
@@ -810,6 +858,102 @@ func Test_viewRun(t *testing.T) {
 			wantBrowserURL: "https://github.com/OWNER/REPO/pull/101/agent-sessions",
 			wantStderr:     "Opening https://github.com/OWNER/REPO/pull/101/agent-sessions in your browser.\n",
 		},
+		{
+			name: "with log (tty)",
+			tty:  true,
+			opts: ViewOptions{
+				SelectorArg: "some-session-id",
+				SessionID:   "some-session-id",
+				Log:         true,
+			},
+			capiStubs: func(t *testing.T, m *capi.CapiClientMock) {
+				m.GetSessionFunc = func(_ context.Context, id string) (*capi.Session, error) {
+					assert.Equal(t, "some-session-id", id)
+					return &capi.Session{
+						ID:        "some-session-id",
+						State:     "completed",
+						CreatedAt: sampleDate,
+						User: &api.GitHubUser{
+							Login: "octocat",
+						},
+					}, nil
+				}
+				m.GetSessionLogsFunc = func(_ context.Context, id string) ([]byte, error) {
+					assert.Equal(t, "some-session-id", id)
+					return []byte("<raw-logs>"), nil
+				}
+			},
+			logRendererStubs: func(t *testing.T, m *shared.LogRendererMock) {
+				m.RenderFunc = func(raw []byte, w io.Writer, cs *iostreams.ColorScheme) (bool, error) {
+					w.Write([]byte("(rendered:) " + string(raw) + "\n"))
+					return false, nil
+				}
+			},
+			wantOut: heredoc.Doc(`
+				Completed
+				Started on behalf of octocat about 6 hours ago
+
+				To follow session logs, try:
+				gh agent-task view 'some-session-id' --log --follow
+
+				(rendered:) <raw-logs>
+			`),
+		},
+		{
+			name: "with log and follow (tty)",
+			tty:  true,
+			opts: ViewOptions{
+				SelectorArg: "some-session-id",
+				SessionID:   "some-session-id",
+				Log:         true,
+				Follow:      true,
+				Sleep:       func(_ time.Duration) {},
+			},
+			capiStubs: func(t *testing.T, m *capi.CapiClientMock) {
+				m.GetSessionFunc = func(_ context.Context, id string) (*capi.Session, error) {
+					assert.Equal(t, "some-session-id", id)
+					return &capi.Session{
+						ID:        "some-session-id",
+						State:     "completed",
+						CreatedAt: sampleDate,
+						User: &api.GitHubUser{
+							Login: "octocat",
+						},
+					}, nil
+				}
+
+				var count int
+				m.GetSessionLogsFunc = func(_ context.Context, id string) ([]byte, error) {
+					assert.Equal(t, "some-session-id", id)
+
+					count++
+					require.Less(t, count, 3, "too many calls to fetch logs")
+					if count == 1 {
+						return []byte("<raw-logs-one>"), nil
+					}
+					return []byte("<raw-logs-two>"), nil
+				}
+			},
+			logRendererStubs: func(t *testing.T, m *shared.LogRendererMock) {
+				m.FollowFunc = func(fetcher func() ([]byte, error), w io.Writer, cs *iostreams.ColorScheme) error {
+					raw, err := fetcher()
+					require.NoError(t, err)
+					w.Write([]byte("(rendered:) " + string(raw) + "\n"))
+
+					raw, err = fetcher()
+					require.NoError(t, err)
+					w.Write([]byte("(rendered:) " + string(raw) + "\n"))
+					return nil
+				}
+			},
+			wantOut: heredoc.Doc(`
+				Completed
+				Started on behalf of octocat about 6 hours ago
+
+				(rendered:) <raw-logs-one>
+				(rendered:) <raw-logs-two>
+			`),
+		},
 	}
 
 	for _, tt := range tests {
@@ -824,6 +968,11 @@ func Test_viewRun(t *testing.T) {
 				tt.promptStubs(t, prompter)
 			}
 
+			logRenderer := &shared.LogRendererMock{}
+			if tt.logRendererStubs != nil {
+				tt.logRendererStubs(t, logRenderer)
+			}
+
 			ios, _, stdout, stderr := iostreams.Test()
 			ios.SetStdoutTTY(tt.tty)
 
@@ -835,6 +984,9 @@ func Test_viewRun(t *testing.T) {
 			opts.Browser = browser
 			opts.CapiClient = func() (capi.CapiClient, error) {
 				return capiClientMock, nil
+			}
+			opts.LogRenderer = func() shared.LogRenderer {
+				return logRenderer
 			}
 
 			err := viewRun(&opts)
